@@ -79,8 +79,8 @@ def fetch_sondes(home_lat, home_lon, range_nm=SONDE_RANGE_NM):
     Weather balloons currently transmitting nearby.
 
     The distance filter is applied here rather than trusted to the API: asking
-    SondeHub for sondes near a given point came back with one over
-    Bavaria, so whatever those parameters do it is not what the names suggest.
+    SondeHub for sondes near a given point came back with one on another
+    continent, so whatever those parameters do it is not what the names suggest.
     """
     params = urllib.parse.urlencode({
         "duration": "3h",

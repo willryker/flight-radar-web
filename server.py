@@ -721,8 +721,8 @@ def build_route(route, ac, now):
 
     Airlines reuse a callsign across the legs of a day and adsbdb answers with
     one of them, so a lookup can hand back a leg this aircraft is not flying.
-    An aeroplane visibly overhead reported as Philadelphia to Chicago
-    is the obvious case, and showing that route is worse than showing none.
+    An aeroplane visibly overhead reported as Philadelphia to Chicago is the
+    obvious case, and showing that route is worse than showing none.
 
     The test is geometric: if going origin -> here -> destination is far
     further than going origin -> destination, "here" is not on this route.
