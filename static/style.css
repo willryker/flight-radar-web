@@ -1,0 +1,462 @@
+/*
+ * Ambient flight radar. Everything here assumes an unattended screen: no
+ * pointer, no scrolling, no selection, nothing that can be nudged into a
+ * broken state by a stray touch or a rotation script reloading the page.
+ */
+
+:root {
+  /* Carried over from the scope firmware (main/ui.c) so the two displays
+     read as the same instrument. */
+  --bg:      #03070a;
+  --accent:  #27d19e;
+  --text:    #edf3f1;
+  --dim:     #8b9a96;
+  --alert:   #ff4d4d;
+  --panel:   rgba(6, 11, 15, 0.78);
+  --edge:    rgba(255, 255, 255, 0.13);
+}
+
+* { box-sizing: border-box; }
+
+/* The `hidden` attribute is only display:none in the browser's own stylesheet,
+   which any author rule with a display of its own outranks. Every panel here
+   sets one, so hiding them did nothing and an empty card sat on the map with
+   its labels and no values. This has to come before those rules and outrank
+   them, hence !important. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", "Roboto", "Helvetica Neue", "DejaVu Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+/* The aircraft layer is one canvas rather than a marker per aircraft. A
+   kiosk runs for weeks; a few hundred DOM nodes being created and destroyed
+   every five seconds is how that ends in a swap storm. */
+#scope {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.panel {
+  position: absolute;
+  z-index: 3;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+#clock {
+  top: 14px;
+  left: 14px;
+  padding: 8px 16px 10px;
+  font-size: clamp(30px, 5.2vh, 54px);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+#weather {
+  top: 14px;
+  right: 14px;
+  padding: 9px 15px;
+  gap: 12px;
+  font-size: clamp(14px, 2.1vh, 21px);
+  font-weight: 500;
+}
+
+#weather-text { color: var(--dim); }
+
+.wx-icon {
+  display: inline-flex;
+  align-items: center;
+  width: 1.35em;
+  height: 1.35em;
+  color: var(--dim);
+}
+
+.wx-icon svg { width: 100%; height: 100%; }
+
+#weather-wind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+
+#weather-wind .arrow {
+  display: inline-block;
+  font-size: 0.85em;
+  color: var(--dim);
+}
+
+#iss {
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 13px;
+  font-size: clamp(12px, 1.8vh, 17px);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #c8a7ff;
+}
+
+/* Deliberately small and dim. It is diagnostic furniture, not part of the
+   picture -- but a self-hosted display that silently freezes on stale data
+   is worse than one that admits it. */
+#status {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: var(--dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px currentColor;
+}
+
+.dot.warn  { background: #f0a02e; }
+.dot.stale { background: var(--alert); }
+
+/* ---------------------------------------------------------------------------
+   Spotlight card
+
+   Sized in vh rather than px so it holds its proportions between a 720p panel
+   and a 1080p TV, and capped so it never eats the map on a small screen.
+   --------------------------------------------------------------------------- */
+
+/* Left side, above the status line. The bottom right belongs to the Leaflet
+   attribution, which the basemap and radar licences require to stay visible
+   -- so the card must not be allowed to grow over it. */
+#detail {
+  left: 14px;
+  bottom: 34px;
+  width: clamp(300px, 27vw, 400px);
+  padding: 0;
+  display: block;
+  overflow: hidden;
+  line-height: 1.25;
+}
+
+#detail.pinned { border-color: rgba(39, 209, 158, 0.55); }
+
+.d-photo {
+  display: block;
+  width: 100%;
+  height: clamp(90px, 13vh, 140px);
+  object-fit: cover;
+  /* planespotters thumbnails vary in aspect; crop rather than letterbox so
+     the card keeps one shape as the spotlight rotates. */
+  background: #0a1116;
+}
+
+.d-body { padding: 11px 13px 12px; }
+
+.d-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.d-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  background: #fff;
+  object-fit: contain;
+  flex: none;
+}
+
+.d-ident { min-width: 0; flex: 1; }
+
+.d-callsign {
+  font-size: clamp(19px, 2.6vh, 26px);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d-airline,
+.d-type {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d-type { color: #6fb9e0; }
+
+.d-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-end;
+  flex: none;
+}
+
+.d-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--dim);
+}
+
+.d-badge.gold  { background: rgba(255, 207, 77, 0.16); color: #ffcf4d; }
+.d-badge.alert { background: rgba(255, 77, 77, 0.18); color: #ff8b8b; }
+.d-badge.radio { background: rgba(120, 255, 160, 0.16); color: #7dffa0; }
+
+.d-radio {
+  margin-top: 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #7dffa0;
+  text-shadow: 0 0 6px rgba(120, 255, 160, 0.35);
+}
+
+.d-route { margin-top: 11px; }
+
+.d-ports {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.d-port { min-width: 0; flex: 1; }
+.d-port-right { text-align: right; }
+
+.d-code {
+  font-size: clamp(17px, 2.3vh, 23px);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.d-city {
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d-arrow {
+  color: var(--accent);
+  font-size: 20px;
+  flex: none;
+}
+
+/* Country of registration, and of each airport. Two letters rather than a
+   flag emoji: see ccChip() in app.js for why. */
+.cc {
+  display: inline-block;
+  margin: 0 4px 0 0;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: #b9c6c2;
+  vertical-align: baseline;
+}
+
+.d-port-right .cc { margin: 0 0 0 4px; }
+
+.d-bar {
+  margin-top: 7px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.d-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.6s ease;
+}
+
+.d-sub {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* Where to point your face. The one line on this card that is about the sky
+   outside rather than the data. */
+.d-spot {
+  margin-top: 7px;
+  font-size: 11px;
+  color: #7fd8ff;
+}
+
+.d-tiles {
+  margin-top: 11px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.d-tile {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 5px 7px;
+  min-width: 0;
+}
+
+.d-key {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.8px;
+  color: var(--dim);
+}
+
+.d-val {
+  display: block;
+  margin-top: 1px;
+  font-size: clamp(12px, 1.7vh, 16px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d-foot {
+  margin-top: 9px;
+  font-size: 10px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Leaflet chrome: keep the attribution (the tile licences require it) but
+   make it recede. */
+.leaflet-container {
+  background: var(--bg);
+  font-family: inherit;
+  outline: none;
+}
+
+.leaflet-control-attribution {
+  background: rgba(3, 7, 10, 0.55) !important;
+  color: #67736f !important;
+  font-size: 10px !important;
+  padding: 1px 6px !important;
+}
+
+.leaflet-control-attribution a {
+  color: #7f8d88 !important;
+  text-decoration: none;
+}
+
+/* ---- CRT / sonar radar view + settings menu (2026-08-20) ---- */
+#radar {
+  position: fixed; inset: 0; z-index: 4; display: block; background: #03070a;
+}
+#radar[hidden] { display: none; }
+.fr-gear {
+  position: fixed; right: 14px; bottom: 14px; z-index: 1200;
+  width: 40px; height: 40px; border-radius: 8px;
+  border: 1px solid rgba(39,209,158,0.4); background: rgba(3,10,12,0.82);
+  color: rgba(39,209,158,0.9); font-size: 20px; line-height: 1; cursor: pointer;
+}
+.fr-gear:hover { border-color: rgba(39,209,158,0.8); }
+.fr-settings {
+  position: fixed; right: 14px; bottom: 62px; z-index: 1200; min-width: 236px;
+  padding: 10px 14px 12px; border-radius: 10px;
+  border: 1px solid rgba(39,209,158,0.35); background: rgba(3,10,12,0.94);
+  color: rgba(39,209,158,0.9);
+  font: 12px/1.4 ui-monospace, "SFMono-Regular", Menlo, monospace;
+  letter-spacing: 0.04em; box-shadow: 0 8px 30px rgba(0,0,0,0.55);
+}
+.fr-settings[hidden] { display: none; }
+.fr-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.fr-lbl { width: 46px; opacity: 0.7; }
+.fr-seg { display: flex; border: 1px solid rgba(39,209,158,0.35);
+  border-radius: 6px; overflow: hidden; }
+.fr-seg button { background: transparent; color: rgba(39,209,158,0.7);
+  border: 0; padding: 4px 12px; cursor: pointer; font: inherit; }
+.fr-seg button.on { background: rgba(39,209,158,0.18); color: #7dffa0; }
+.fr-step { width: 24px; height: 24px; border-radius: 5px;
+  border: 1px solid rgba(39,209,158,0.35); background: transparent;
+  color: rgba(39,209,158,0.9); cursor: pointer; font: inherit; }
+#fr-range { flex: 1; accent-color: #27d19e; }
+.fr-val { width: 58px; text-align: right; color: #7dffa0; }
+
+.fr-settings { min-width: 300px; }
+.fr-seg-sm button { padding: 4px 7px; font-size: 11px; }
+
+.fr-row-wrap { align-items: flex-start; }
+.fr-toggles { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; }
+.fr-tog { border: 1px solid rgba(39,209,158,0.35); background: transparent;
+  color: rgba(39,209,158,0.5); border-radius: 6px; padding: 4px 8px;
+  font: inherit; font-size: 11px; cursor: pointer; }
+.fr-tog.on { background: rgba(39,209,158,0.18); color: #7dffa0; border-color: rgba(39,209,158,0.6); }
+.ap-tip { background: rgba(3,10,12,0.85); border: 0; color: #96aab4;
+  font: 10px ui-monospace, "SFMono-Regular", monospace; box-shadow: none; padding: 0 3px; }
+.ap-tip::before { display: none; }
+
+.ap-card { position: fixed; left: 14px; bottom: 14px; z-index: 1150; min-width: 240px;
+  max-width: 340px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid rgba(150,170,180,0.4); background: rgba(3,10,12,0.95); color: #cfe0e6;
+  font: 12px/1.5 ui-monospace, "SFMono-Regular", Menlo, monospace; box-shadow: 0 8px 30px rgba(0,0,0,0.55); }
+.ap-card[hidden] { display: none; }
+.ap-close { position: absolute; top: 8px; right: 10px; background: transparent; border: 0;
+  color: #7f9099; font-size: 14px; cursor: pointer; }
+.ap-name { font-size: 15px; color: #dfeef2; margin-right: 18px; }
+.ap-sub { color: #8fa6ae; margin: 3px 0 8px; font-size: 11px; }
+.ap-stats { display: flex; gap: 14px; color: #b9d7cf; flex-wrap: wrap; }
+.ap-rwh { color: #6f8088; margin: 9px 0 3px; font-size: 10px; letter-spacing: 0.08em; }
+.ap-rw { display: flex; justify-content: space-between; gap: 10px; color: #b9c9cf; }
+.ap-rw span:first-child { color: #96c7bb; min-width: 54px; }
+
+.ap-photo { width: 100%; height: 132px; object-fit: cover; border-radius: 7px; margin-bottom: 8px; display: block; }
+.ap-photo[hidden] { display: none; }
+.ap-addr { color: #93a7af; font-size: 11px; margin-bottom: 8px; }
+.ap-freqs[hidden] { display: none; }
+.ap-fq { color: #a9c6cf; font-size: 11px; }
+.ap-web { display: inline-block; margin-top: 9px; color: #7dffa0; text-decoration: none; font-size: 11px; }
+.ap-web[hidden] { display: none; }

@@ -1,0 +1,42 @@
+[Unit]
+Description=Flight radar ambient web page
+After=network-online.target
+Wants=network-online.target
+
+# The upstream feeds go down, DNS blips, the Pi reboots. None of that should
+# need a person, so the service is expected to come back by itself and to keep
+# doing so however many times it takes. This key belongs in [Unit]; systemd
+# 230 moved it there, and a modern systemd logs "Unknown key" and silently
+# applies the default limit of five restarts in ten seconds if it is left in
+# [Service] -- which is exactly the case where giving up is worst.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=flightradar
+Group=flightradar
+Environment=FLIGHT_RADAR_CONFIG=/etc/flight-radar/config.json
+ExecStart=/usr/bin/python3 /opt/flight-radar/server.py
+Restart=always
+RestartSec=5
+
+# It is a static file server that talks to four public APIs. It has no
+# business anywhere outside its own state directory.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The settings panel writes the config file, so this one directory has to
+# be writable. ProtectSystem=strict still covers the rest of the disk.
+ReadWritePaths=/var/lib/flight-radar /etc/flight-radar
+
+[Install]
+WantedBy=multi-user.target

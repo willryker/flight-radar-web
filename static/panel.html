@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Radar — panel</title>
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<style>
+/*
+ * The panel is the opposite of the radar page: it is looked at up close, by
+ * someone who wants to change something. So it scrolls, it has a pointer, and
+ * text can be selected and copied. Same palette, different rules.
+ */
+:root {
+  --bg: #03070a; --panel: #0a1116; --accent: #27d19e; --text: #edf3f1;
+  --dim: #8b9a96; --edge: rgba(255,255,255,0.11); --alert: #ff4d4d;
+  --gold: #ffcf4d;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 22px 26px 60px; background: var(--bg); color: var(--text);
+  font-family: "Inter","Roboto","Helvetica Neue","DejaVu Sans",system-ui,sans-serif;
+  font-size: 14px; line-height: 1.45;
+}
+h1 { font-size: 22px; margin: 0 0 3px; font-weight: 600; }
+h1 span { color: var(--accent); }
+.sub { color: var(--dim); font-size: 13px; margin-bottom: 16px; }
+
+.tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.tab {
+  padding: 7px 17px; border-radius: 16px; border: 1px solid var(--edge);
+  background: transparent; color: var(--dim); cursor: pointer; font: inherit;
+}
+.tab.on { background: var(--accent); color: #04120d; border-color: var(--accent); font-weight: 600; }
+.page { display: none; }
+.page.on { display: block; }
+
+.cards { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.card {
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+  padding: 10px 14px; min-width: 118px;
+}
+.card .k { font-size: 11px; color: var(--dim); }
+.card .v { font-size: 19px; font-weight: 600; margin-top: 2px; }
+
+#map { height: 420px; border: 1px solid var(--edge); border-radius: 8px; background: var(--bg); }
+
+table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+th {
+  text-align: left; color: var(--accent); font-weight: 600; font-size: 12px;
+  padding: 7px 9px; border-bottom: 1px solid var(--edge); white-space: nowrap;
+}
+td { padding: 7px 9px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; }
+tr:hover td { background: rgba(255,255,255,0.03); }
+.muted { color: var(--dim); }
+.gold { color: var(--gold); }
+.bad { color: var(--alert); }
+.mono { font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 12px; }
+
+.bar { width: 84px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.1); }
+.bar span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+
+.field { margin-bottom: 14px; max-width: 620px; }
+.field label { display: block; font-weight: 600; margin-bottom: 2px; }
+.field .help { color: var(--dim); font-size: 12px; margin-bottom: 5px; }
+.field input[type=text], .field input[type=password], .field select {
+  width: 100%; padding: 7px 9px; border-radius: 5px; border: 1px solid var(--edge);
+  background: #060d12; color: var(--text); font: inherit;
+}
+.field input[type=checkbox] { width: 16px; height: 16px; vertical-align: -2px; }
+.restart-note { color: var(--gold); font-size: 12px; }
+
+button.act {
+  padding: 9px 20px; border-radius: 6px; border: 1px solid var(--accent);
+  background: var(--accent); color: #04120d; font: inherit; font-weight: 600;
+  cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--accent); }
+.actions { display: flex; gap: 10px; align-items: center; margin: 20px 0 8px; flex-wrap: wrap; }
+#saved { color: var(--accent); }
+
+.group { margin: 26px 0 8px; font-size: 12px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
+a { color: var(--accent); }
+code { background: rgba(255,255,255,0.07); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.gate { max-width: 340px; margin: 60px auto; text-align: center; }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate" hidden>
+  <h1>Flight <span>Radar</span></h1>
+  <div class="sub">This panel is password protected.</div>
+  <div class="field"><input id="gate-pw" type="password" placeholder="Password"></div>
+  <button class="act" id="gate-go">Unlock</button>
+  <div id="gate-err" class="bad" style="margin-top:10px"></div>
+</div>
+
+<div id="app" hidden>
+  <h1>Flight <span>Radar</span></h1>
+  <div class="sub" id="headline">loading…</div>
+
+  <div class="tabs">
+    <button class="tab on" data-page="live">Live</button>
+    <button class="tab" data-page="history">History</button>
+    <button class="tab" data-page="settings">Settings</button>
+    <button class="tab" data-page="api">API</button>
+  </div>
+
+  <div class="page on" id="page-live">
+    <div class="cards" id="stats"></div>
+    <div id="map"></div>
+    <table id="flights">
+      <thead><tr>
+        <th>Flight</th><th>Airline</th><th>Aircraft</th><th>Route</th>
+        <th>Progress</th><th>Alt</th><th>Speed</th><th>Dist</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="page" id="page-history">
+    <div class="group">Alerts &nbsp; <a href="/api/alerts.csv">download CSV</a></div>
+    <table id="alerts">
+      <thead><tr><th>When</th><th>Kind</th><th>What</th><th>Type</th><th>Dist</th><th>Alt</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="group">Spotting log &nbsp; <a href="/api/log.csv">download CSV</a></div>
+    <table id="spots">
+      <thead><tr><th>When</th><th>Callsign</th><th>Reg</th><th>Type</th><th>Airline</th><th>Dist</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="page" id="page-settings">
+    <div id="settings"></div>
+    <div class="actions">
+      <button class="act" id="save">Save</button>
+      <button class="act ghost" id="save-restart">Save and restart</button>
+      <span id="saved"></span>
+    </div>
+    <div class="sub">
+      Settings marked <span class="restart-note">restart</span> only take effect
+      when the service restarts. "Save and restart" exits the process; systemd
+      brings it straight back.
+    </div>
+  </div>
+
+  <div class="page" id="page-api">
+    <div class="group">Endpoints</div>
+    <table>
+      <thead><tr><th>Method</th><th>Path</th><th>What</th></tr></thead>
+      <tbody id="api-rows"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/vendor/leaflet.js"></script>
+<script>
+'use strict';
+
+var API = [
+  ['GET', '/', 'The radar page itself.'],
+  ['GET', '/panel', 'This panel.'],
+  ['GET', '/api/state', 'Everything on screen: aircraft, routes, trails, weather, radar frame, ISS, sondes, ships, airspace. Gzipped when asked.'],
+  ['GET', '/api/health', 'Source, count, age of the last good poll, stale flag. The one to monitor.'],
+  ['GET', '/api/alerts', 'Alert history, newest first. Add .csv for a spreadsheet.'],
+  ['GET', '/api/log', 'Spotting log: every aircraft seen, once. Add .csv.'],
+  ['GET', '/api/config', 'Current settings. Secrets are redacted.'],
+  ['POST', '/api/config', 'Write settings. Send only the keys you are changing.'],
+  ['POST', '/api/restart', 'Exit so systemd restarts the service.'],
+  ['POST', '/api/login', 'Exchange the panel password for a session cookie.'],
+  ['GET', '/api/logo/<ICAO>.png', 'Airline logo, cached on disk here.'],
+  ['GET', '/api/photo/<hex>.jpg', 'Aircraft photo, cached on disk here.'],
+  ['GET', '/metrics', 'Prometheus exposition.']
+];
+
+// label, help, type. Anything not listed is not editable from here.
+var FIELDS = [
+  ['Location', [
+    ['lat', 'Latitude', 'Where the radar is standing. Decimal degrees.', 'text'],
+    ['lon', 'Longitude', 'Decimal degrees, negative for west.', 'text'],
+    ['range_nm', 'Range (nm)', 'Both the query radius and the ring on screen.', 'text'],
+    ['timezone', 'Timezone', 'IANA name for the clock, e.g. Europe/London. Blank uses the viewing browser.', 'text'],
+    ['units', 'Units', '', 'select:aviation,metric'],
+    ['temperature_unit', 'Temperature', '', 'select:celsius,fahrenheit']
+  ]],
+  ['Display', [
+    ['label_count', 'Labelled aircraft', 'How many of the nearest get a callsign tag. The rest stay bare so the picture does not turn into soup.', 'text'],
+    ['trail_points', 'Trail length', 'Positions kept behind each aircraft. 0 turns trails off.', 'text'],
+    ['max_aircraft', 'Max aircraft', 'Upper bound on what is tracked at once.', 'text'],
+    ['poll_interval_s', 'Poll interval (s)', 'Keep at or above 2: airplanes.live rate limits to one request per second.', 'text'],
+    ['show_weather', 'Weather chip', '', 'bool'],
+    ['show_precipitation', 'Precipitation overlay', '', 'bool'],
+    ['precipitation_opacity', 'Precipitation opacity', '0 to 1.', 'text'],
+    ['basemap_url', 'Basemap URL', 'Any {z}/{x}/{y} tile URL.', 'text']
+  ]],
+  ['Enrichment', [
+    ['route_lookup', 'Route lookup', 'Origin and destination from adsbdb.', 'bool'],
+    ['aircraft_lookup', 'Aircraft lookup', 'Registration, type, owner and photo.', 'bool'],
+    ['show_photos', 'Aircraft photos', '', 'bool'],
+    ['show_logos', 'Airline logos', '', 'bool']
+  ]],
+  ['Overlays', [
+    ['show_iss', 'ISS', 'Shown only while it is above the horizon.', 'bool'],
+    ['show_sondes', 'Radiosondes', 'SondeHub. Needs no key.', 'bool'],
+    ['sonde_range_nm', 'Sonde range (nm)', '135 nm is the 250 km the firmware uses.', 'text'],
+    ['show_ships', 'Ships (AIS)', 'Needs an aisstream.io key below, and stays off without one.', 'bool'],
+    ['aisstream_key', 'aisstream.io key', 'Free from aisstream.io.', 'password'],
+    ['show_airspace', 'Airspace outlines', 'Needs an openAIP key below.', 'bool'],
+    ['openaip_key', 'openAIP key', 'Free from openaip.net.', 'password']
+  ]],
+  ['Alerts', [
+    ['watchlist', 'Watchlist', 'Comma-separated callsign or registration prefixes, e.g. "RYR, N12, SP-". Matches are highlighted gold.', 'text'],
+    ['alert_emergency', 'Emergency squawks', '7500, 7600, 7700.', 'bool'],
+    ['alert_watchlist', 'Watchlist matches', '', 'bool'],
+    ['alert_military', 'Military', '', 'bool'],
+    ['alert_notable', 'Notable types', 'A380, An-124, C-17, 747 and similar.', 'bool'],
+    ['ntfy_topic', 'ntfy topic', 'Push notifications. Blank disables.', 'text'],
+    ['ntfy_server', 'ntfy server', '', 'text'],
+    ['webhook_url', 'Webhook URL', 'Receives the alert as JSON.', 'text'],
+    ['mqtt_uri', 'MQTT broker', 'mqtt://user:pass@host:1883, or mqtts:// for TLS. For Home Assistant.', 'text'],
+    ['mqtt_topic', 'MQTT topic', '', 'text']
+  ]],
+  ['Panel', [
+    ['panel_password', 'Panel password', 'Blank leaves the panel open. This is a shared secret over plain HTTP: it keeps passers-by out of the settings, nothing more.', 'password']
+  ]]
+];
+
+var cfg = null, meta = null, map = null, markers = null, state = null;
+
+function el(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+}
+function when(t) {
+  var d = new Date(t * 1000);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+         d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// -- tabs -------------------------------------------------------------------
+
+Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (tab) {
+  tab.addEventListener('click', function () {
+    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
+      t.classList.toggle('on', t === tab);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.page'), function (p) {
+      p.classList.toggle('on', p.id === 'page-' + tab.dataset.page);
+    });
+    if (tab.dataset.page === 'live' && map) { map.invalidateSize(); }
+    if (tab.dataset.page === 'history') { loadHistory(); }
+  });
+});
+
+// -- live -------------------------------------------------------------------
+
+function initMap() {
+  map = L.map('map', { zoomControl: true, attributionControl: true });
+  L.tileLayer(state.config.basemap_url.replace('{r}', ''), {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap &middot; &copy; CARTO'
+  }).addTo(map);
+  markers = L.layerGroup().addTo(map);
+  map.setView([state.config.lat, state.config.lon], 9);
+  L.circle([state.config.lat, state.config.lon], {
+    radius: state.config.range_nm * 1852, color: '#27d19e',
+    weight: 1, fill: false, opacity: 0.5
+  }).addTo(map);
+}
+
+function drawLive() {
+  var h = state.health;
+  var wx = state.weather;
+  el('headline').innerHTML =
+    esc(state.config.lat.toFixed(4)) + ', ' + esc(state.config.lon.toFixed(4)) +
+    ' &middot; ' + esc(state.config.range_nm) + ' nm' +
+    (wx && wx.temp !== null ? ' &middot; ' + Math.round(wx.temp) + '&deg;' + esc(wx.temp_unit) : '') +
+    ' &middot; source ' + esc(h.source || '—') +
+    (h.stale ? ' <span class="bad">(stale)</span>' : '');
+
+  var cards = [
+    ['Aircraft', h.count],
+    ['Feed', h.stale ? 'stale' : 'ok'],
+    ['Last poll', (h.last_ok_age_s === null ? '—' : h.last_ok_age_s + ' s')],
+    ['Sondes', state.sondes.length],
+    ['Ships', state.ships.length],
+    ['Airspace', state.airspace.length]
+  ];
+  el('stats').innerHTML = cards.map(function (c) {
+    return '<div class="card"><div class="k">' + esc(c[0]) +
+           '</div><div class="v">' + esc(c[1]) + '</div></div>';
+  }).join('');
+
+  if (!map) { initMap(); }
+  markers.clearLayers();
+
+  var rows = state.aircraft.map(function (a) {
+    var r = a.route || {};
+    var air = r.airline || {};
+    var route = '<span class="muted">—</span>';
+    if (r.from && r.to) {
+      route = esc(r.from.iata || r.from.icao) + ' &rarr; ' + esc(r.to.iata || r.to.icao) +
+              '<br><span class="muted">' + esc(r.from.city || '') + ' &rarr; ' +
+              esc(r.to.city || '') + '</span>';
+    } else if (r.rejected) {
+      route = '<span class="muted">not on file</span>';
+    }
+    var pct = r.progress !== undefined ? Math.round(r.progress * 100) : null;
+
+    L.circleMarker([a.lat, a.lon], {
+      radius: 4,
+      color: a.emergency ? '#ff4d4d' : (a.interesting ? '#ffcf4d' : '#27d19e'),
+      fillOpacity: 0.85, weight: 1
+    }).bindTooltip((a.flight || a.reg || a.hex) + ' · ' + Math.round(a.alt_ft) + ' ft')
+      .addTo(markers);
+    if (a.trail && a.trail.length > 1) {
+      L.polyline(a.trail, { color: '#27d19e', weight: 1, opacity: 0.35 }).addTo(markers);
+    }
+
+    return '<tr>' +
+      '<td><b class="' + (a.emergency ? 'bad' : (a.interesting ? 'gold' : '')) + '">' +
+        esc(a.flight || a.reg || a.hex) + '</b>' +
+        (a.military ? ' <span class="gold">MIL</span>' : '') +
+        (a.watch ? ' <span class="gold">WATCH</span>' : '') + '</td>' +
+      '<td>' + esc(air.name || a.owner || '') + '</td>' +
+      '<td>' + esc(a.type_long || a.desc || a.type || '') + '</td>' +
+      '<td>' + route + '</td>' +
+      '<td>' + (pct === null ? '<span class="muted">—</span>' :
+        '<div class="bar"><span style="width:' + pct + '%"></span></div>' + pct + '%') + '</td>' +
+      '<td>' + (a.on_ground ? 'ground' : Math.round(a.alt_ft).toLocaleString() + ' ft') + '</td>' +
+      '<td>' + Math.round(a.gs_kt) + ' kt</td>' +
+      '<td>' + a.dist_nm.toFixed(1) + ' nm</td>' +
+    '</tr>';
+  });
+  el('flights').querySelector('tbody').innerHTML =
+    rows.join('') || '<tr><td colspan="8" class="muted">Nothing in range.</td></tr>';
+}
+
+// -- history ----------------------------------------------------------------
+
+function loadHistory() {
+  fetch('/api/alerts').then(function (r) { return r.json(); }).then(function (rows) {
+    el('alerts').querySelector('tbody').innerHTML = rows.map(function (a) {
+      return '<tr><td class="muted">' + esc(when(a.t)) + '</td>' +
+        '<td class="' + (a.kind === 'emergency' ? 'bad' : 'gold') + '">' + esc(a.kind) + '</td>' +
+        '<td>' + esc(a.title) + '</td><td>' + esc(a.type) + '</td>' +
+        '<td>' + esc(a.dist_nm) + ' nm</td><td>' + esc(a.alt_ft) + ' ft</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="muted">No alerts yet.</td></tr>';
+  });
+
+  fetch('/api/log').then(function (r) { return r.json(); }).then(function (rows) {
+    el('spots').querySelector('tbody').innerHTML = rows.slice(0, 300).map(function (s) {
+      return '<tr><td class="muted">' + esc(when(s.t)) + '</td>' +
+        '<td>' + esc(s.callsign || '—') + '</td><td>' + esc(s.reg || '') + '</td>' +
+        '<td>' + esc(s.type || '') + '</td><td>' + esc(s.airline || '') + '</td>' +
+        '<td>' + esc(s.dist_nm) + ' nm</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="muted">Nothing logged yet.</td></tr>';
+  });
+}
+
+// -- settings ---------------------------------------------------------------
+
+function drawSettings() {
+  var out = [];
+  FIELDS.forEach(function (group) {
+    out.push('<div class="group">' + esc(group[0]) + '</div>');
+    group[1].forEach(function (f) {
+      var key = f[0], label = f[1], help = f[2], type = f[3];
+      var value = cfg[key];
+      var restart = meta.needs_restart_for.indexOf(key) >= 0
+        ? ' <span class="restart-note">restart</span>' : '';
+
+      // Secrets are never sent to the browser, so the field starts empty and
+      // says whether one is stored. Blank on save means "leave it alone";
+      // there is an explicit word for clearing it.
+      var secret = meta.secrets_set && (key in meta.secrets_set);
+      if (secret) {
+        help = (help ? help + ' ' : '') +
+          (meta.secrets_set[key]
+            ? 'A key is stored. Leave blank to keep it, or type ' +
+              meta.clear_secret_with + ' to remove it.'
+            : 'Not set.');
+      }
+      var input;
+      if (type === 'bool') {
+        input = '<input type="checkbox" data-key="' + key + '"' + (value ? ' checked' : '') + '>';
+      } else if (type.indexOf('select:') === 0) {
+        input = '<select data-key="' + key + '">' + type.slice(7).split(',').map(function (o) {
+          return '<option' + (String(value) === o ? ' selected' : '') + '>' + esc(o) + '</option>';
+        }).join('') + '</select>';
+      } else {
+        input = '<input type="' + (type === 'password' ? 'password' : 'text') +
+                '" data-key="' + key + '" value="' +
+                esc(value === null || value === undefined ? '' : value) + '"' +
+                (secret && meta.secrets_set[key] ? ' placeholder="stored"' : '') + '>';
+      }
+      out.push('<div class="field"><label>' + esc(label) + restart + '</label>' +
+               (help ? '<div class="help">' + esc(help) + '</div>' : '') + input + '</div>');
+    });
+  });
+  el('settings').innerHTML = out.join('');
+}
+
+function collect() {
+  var body = {};
+  Array.prototype.forEach.call(el('settings').querySelectorAll('[data-key]'), function (i) {
+    body[i.dataset.key] = i.type === 'checkbox' ? i.checked : i.value;
+  });
+  return body;
+}
+
+function save(thenRestart) {
+  el('saved').textContent = 'saving…';
+  fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collect())
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.error) { el('saved').textContent = 'failed: ' + res.error; return; }
+    el('saved').textContent = 'saved ' + res.changed.length + ' setting(s)';
+    if (thenRestart) {
+      el('saved').textContent = 'restarting…';
+      fetch('/api/restart', { method: 'POST' }).then(function () {
+        setTimeout(function () { location.reload(); }, 4000);
+      });
+    }
+  }).catch(function (e) { el('saved').textContent = 'failed: ' + e; });
+}
+
+el('save').addEventListener('click', function () { save(false); });
+el('save-restart').addEventListener('click', function () { save(true); });
+
+// -- boot -------------------------------------------------------------------
+
+el('api-rows').innerHTML = API.map(function (a) {
+  return '<tr><td class="mono">' + esc(a[0]) + '</td><td class="mono">' +
+         esc(a[1]) + '</td><td>' + esc(a[2]) + '</td></tr>';
+}).join('');
+
+function start() {
+  el('gate').hidden = true;
+  el('app').hidden = false;
+  fetch('/api/config').then(function (r) { return r.json(); }).then(function (res) {
+    cfg = res.config; meta = res; drawSettings();
+  });
+  function tick() {
+    fetch('/api/state', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (s) { state = s; drawLive(); })
+      .catch(function () {});
+  }
+  tick();
+  setInterval(tick, 5000);
+}
+
+el('gate-go').addEventListener('click', function () {
+  fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: el('gate-pw').value })
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    if (res.ok) { start(); } else { el('gate-err').textContent = res.error || 'no'; }
+  });
+});
+el('gate-pw').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { el('gate-go').click(); }
+});
+
+fetch('/api/session').then(function (r) { return r.json(); }).then(function (s) {
+  if (!s.protected || s.authorised) { start(); } else { el('gate').hidden = false; }
+});
+</script>
+</body>
+</html>

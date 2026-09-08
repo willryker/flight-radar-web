@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+
+# Local rollback copies taken before risky edits.
+.pre-*-backup-*/
+
+# The real configuration: home coordinates, the openAIP and aisstream keys,
+# the panel password and the ntfy topic. The deployed copy lives at
+# /etc/flight-radar/config.json and none of it belongs in the repo.
+config.json
+
+# Runtime state: enrichment caches, alert and spotting logs.
+*.jsonl
+tools/.airport-cache/
+
+# Airport overlay data, rebuilt by tools/build_airports.py.
+#
+# Two reasons it is not committed. The aerial thumbnails are exported from
+# Esri World Imagery, which is free to fetch but not ours to redistribute in
+# bulk. And both are built for one home location, so committing them would
+# publish roughly where the receiver sits. Run the tool to build your own.
+static/airports/
+static/airports.json

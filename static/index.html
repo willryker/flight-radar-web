@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flight Radar</title>
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="map"></div>
+<canvas id="scope"></canvas>
+<canvas id="radar" hidden></canvas>
+
+<div id="clock" class="panel">
+  <span id="clock-time">--:--</span>
+</div>
+
+<div id="weather" class="panel" hidden>
+  <span id="weather-icon" class="wx-icon"></span>
+  <span id="weather-temp"></span>
+  <span id="weather-wind"></span>
+  <span id="weather-text"></span>
+</div>
+
+<!-- The spotlight card. Rotates through the traffic worth looking at on its
+     own, and pins to whatever you click. Everything in it is hidden until
+     there is something to put in it, so a quiet sky shows an empty map
+     rather than a card full of dashes. -->
+<div id="detail" class="panel" hidden>
+  <img id="d-photo" class="d-photo" alt="" hidden>
+  <div class="d-body">
+    <div class="d-head">
+      <img id="d-logo" class="d-logo" alt="" hidden>
+      <div class="d-ident">
+        <div id="d-callsign" class="d-callsign"></div>
+        <div id="d-airline" class="d-airline"></div>
+        <div id="d-type" class="d-type"></div>
+      </div>
+      <div id="d-badges" class="d-badges"></div>
+    </div>
+
+    <div id="d-route" class="d-route" hidden>
+      <div class="d-ports">
+        <div class="d-port">
+          <div id="d-from-code" class="d-code"></div>
+          <div id="d-from-city" class="d-city"></div>
+        </div>
+        <div class="d-arrow">›</div>
+        <div class="d-port d-port-right">
+          <div id="d-to-code" class="d-code"></div>
+          <div id="d-to-city" class="d-city"></div>
+        </div>
+      </div>
+      <div class="d-bar"><span id="d-bar-fill"></span></div>
+      <div id="d-progress" class="d-sub"></div>
+    </div>
+
+    <div id="d-spot" class="d-spot" hidden></div>
+  <div id="d-radio" class="d-radio" hidden></div>
+
+    <div class="d-tiles">
+      <div class="d-tile"><span class="d-key">ALTITUDE</span><span id="d-alt" class="d-val"></span></div>
+      <div class="d-tile"><span class="d-key">SPEED</span><span id="d-spd" class="d-val"></span></div>
+      <div class="d-tile"><span class="d-key">V/RATE</span><span id="d-vs" class="d-val"></span></div>
+      <div class="d-tile"><span class="d-key">DISTANCE</span><span id="d-dist" class="d-val"></span></div>
+      <div class="d-tile"><span class="d-key">TRACK</span><span id="d-trk" class="d-val"></span></div>
+      <div class="d-tile"><span class="d-key">REG</span><span id="d-reg" class="d-val"></span></div>
+    </div>
+
+    <div id="d-foot" class="d-foot"></div>
+  </div>
+</div>
+
+<!-- Only appears when the ISS is actually above the horizon. A permanent
+     readout of where it is on the far side of the planet is trivia; a note
+     that it is passing over right now is a reason to go outside. -->
+<div id="iss" class="panel" hidden>
+  <span id="iss-text"></span>
+</div>
+
+<div id="status">
+  <span id="status-dot" class="dot"></span>
+  <span id="status-text">starting</span>
+</div>
+
+
+<!-- View switch + scope-distance control. The radar is a second ambient
+     view; the map keeps running underneath it. -->
+<button id="fr-gear" class="fr-gear" aria-label="Settings">⚙</button>
+<div id="fr-settings" class="fr-settings" hidden>
+  <div class="fr-row"><span class="fr-lbl">VIEW</span>
+    <div class="fr-seg"><button data-view="map" class="on">MAP</button><button data-view="radar">RADAR</button></div></div>
+  <div class="fr-row"><span class="fr-lbl">RANGE</span>
+    <input id="fr-range" type="range" min="5" max="250" step="5" value="20"><span id="fr-rval" class="fr-val">20 NM</span></div>
+  <div class="fr-row"><span class="fr-lbl">TRAIL</span>
+    <input id="fr-trail" type="range" min="0" max="40" step="2" value="12"><span id="fr-tval" class="fr-val">12</span></div>
+  <div class="fr-row fr-row-wrap"><span class="fr-lbl">SHOW</span>
+    <div class="fr-toggles">
+      <button data-class="com" class="fr-tog on">Airlines</button>
+      <button data-class="priv" class="fr-tog on">Private</button>
+      <button data-class="heli" class="fr-tog on">Heli</button>
+      <button data-class="mil" class="fr-tog on">Military</button>
+      <button data-class="pub" class="fr-tog on">Fire/Police</button>
+      <button data-class="other" class="fr-tog on">Other</button>
+    </div></div>
+  <div class="fr-row"><span class="fr-lbl">APTS</span>
+    <button data-air class="fr-tog">Airports</button></div>
+  <div class="fr-row"><span class="fr-lbl">TAG</span>
+    <div class="fr-toggles"><button data-tagf="cs" class="fr-tog on">Callsign</button><button data-tagf="alt" class="fr-tog">Alt</button><button data-tagf="gs" class="fr-tog">Speed</button><button data-tagf="dest" class="fr-tog">Dest</button></div></div>
+  <div class="fr-row"><span class="fr-lbl">UNITS</span>
+    <div class="fr-seg"><button data-unit="aviation" class="on">AV</button><button data-unit="metric">METRIC</button></div></div>
+</div>
+
+<div id="ap-card" class="ap-card" hidden>
+  <button id="ap-close" class="ap-close">✕</button>
+  <img id="ap-photo" class="ap-photo" alt="" hidden>
+  <div id="ap-name" class="ap-name"></div>
+  <div id="ap-sub" class="ap-sub"></div>
+  <div id="ap-addr" class="ap-addr"></div>
+  <div id="ap-stats" class="ap-stats"></div>
+  <div id="ap-freqs" class="ap-freqs" hidden></div>
+  <div id="ap-runways" class="ap-runways"></div>
+  <a id="ap-web" class="ap-web" target="_blank" rel="noopener">Website ↗</a>
+</div>
+
+<script src="/vendor/leaflet.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
