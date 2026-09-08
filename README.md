@@ -1,4 +1,4 @@
-# Flight Radar — web
+# Flight Radar web
 
 An ambient flight-tracking page for a wall display. Live ADS-B traffic around
 one fixed location on a Leaflet map, with tap-to-inspect detail cards, weather
@@ -54,9 +54,9 @@ All free, none requiring a key except where noted.
 
 ## Configuration
 
-Everything that identifies one install — home coordinates, API keys, the panel
-password, the ntfy topic — lives in `config.json`, which is **not** in this
-repo. The service reads it from `FLIGHT_RADAR_CONFIG`, and the deployment puts
+Everything that identifies one install lives in `config.json`, which is not in
+this repo. That means the home coordinates, the API keys, the panel password
+and the ntfy topic. The service reads it from `FLIGHT_RADAR_CONFIG`, and the deployment puts
 it at `/etc/flight-radar/config.json`.
 
 Settings are edited through the panel at `/panel.html` rather than by hand.
@@ -65,10 +65,9 @@ appropriate on a network you control.
 
 ## Airport overlay
 
-`static/airports.json` and `static/airports/*.jpg` are **not committed** —
-they are built for one location, and the aerial thumbnails come from Esri
-World Imagery, which is free to fetch but not ours to redistribute. Build your
-own set:
+`static/airports.json` and `static/airports/*.jpg` are not committed. They are
+built for one location, and the aerial thumbnails come from Esri World Imagery,
+which is free to fetch but not ours to redistribute. Build your own set:
 
     python3 tools/build_airports.py              # uses the location in config.json
     python3 tools/build_airports.py --lat 51.47 --lon -0.00 --radius 60
@@ -82,7 +81,7 @@ works without it; the airport overlay is simply empty.
     sudo deploy/install.sh
 
 Installs to `/opt/flight-radar`, runs as a dedicated `flightradar` user, and
-enables the systemd unit. The unit is deliberately confined — `ProtectSystem=strict`,
+enables the systemd unit. The unit is deliberately confined: `ProtectSystem=strict`,
 `PrivateDevices`, no new privileges, and write access to exactly two
 directories. It is a static file server that talks to public APIs and has no
 business anywhere else on the disk.
